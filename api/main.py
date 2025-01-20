@@ -40,8 +40,28 @@ class CityTransportation(Base):
     stationid = Column(Integer, primary_key=True, index=True)
     city = Column(String, nullable=False)
     stationoperatortypename = Column(String, nullable=False)
+    stationtypename = Column(String, nullable=False)
     lat = Column(Float, nullable=False)
     long = Column(Float, nullable=False)
+
+class CityShoppingCenter(Base):
+    __tablename__ = "shopping_center"
+    __table_args__ = {"schema": "sbp"}
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, nullable=False)
+    remarks = Column(String, nullable=False)
+    lat = Column(Float, nullable=False)
+    lon = Column(Float, nullable=False)
+
+class FutureBusiness(Base):
+    __tablename__ = "future_business"
+    __table_args__ = {"schema": "sbp"}
+    id = Column(Integer, primary_key=True, index=True)
+    plandisgn = Column(String, nullable=False)
+    shape_area = Column(Float, nullable=False)
+    internet = Column(String, nullable=False)
+    lat = Column(Float, nullable=False)
+    lon = Column(Float, nullable=False)
 
 # ------- Define models response:
 class StoreLocationResponse(BaseModel):
@@ -69,14 +89,33 @@ class CityPopulationResponse(BaseModel):
 
 class CityTransportationResponse(BaseModel):
     city: str
-    stationoperatortypename: str
+    stationtypename: str
     lat: float
     long: float
 
     class Config:
         from_attributes = True
 
+class CityShoppingCenterResponse(BaseModel):
+    id: int
+    name: str
+    remarks: str
+    lat: float
+    lon: float
 
+    class Config:
+        from_attributes = True
+
+class FutureBusinessResponse(BaseModel):
+    id: int
+    plandisgn: str
+    shape_area: float
+    internet: str
+    lat: float
+    lon: float
+
+    class Config:
+        from_attributes = True
 
 # ------- application:
 app = FastAPI()
@@ -121,3 +160,23 @@ def get_city_transportation(city: str, stationoperatortypename: str):
     if not operators:
         raise HTTPException(status_code=404, detail="No station operators found for this city and type")
     return operators
+
+# Endpoint to fetch shopping centers
+@app.get("/city-shopping-center/", response_model=list[CityShoppingCenterResponse])
+def get_shopping_center():
+    db = SessionLocal()
+    population = db.query(CityShoppingCenter).all()
+    db.close()
+    if not population:
+        raise HTTPException(status_code=404, detail="No shopping center found.")
+    return population
+
+# Endpoint to fetch future business
+@app.get("/future-business/", response_model=list[FutureBusinessResponse])
+def get_shopping_center():
+    db = SessionLocal()
+    population = db.query(FutureBusiness).all()
+    db.close()
+    if not population:
+        raise HTTPException(status_code=404, detail="No future business found.")
+    return population
