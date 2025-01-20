@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Smart Business Planning</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <link rel="stylesheet" href="css/styles.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="scripts/scripts.js" defer></script>
+</head>
+<body>
+    <div class="layers-container">
+        <div class="layer-button" id="busStationLayerButton">
+            <div class="image-container">
+                <img src="static/bus.png" alt="Bus Stations">
+            </div>
+            <span class="button-label">אוטובוס</span>
+        </div>
+        <div class="layer-button" id="trainStationLayerButton">
+            <div class="image-container">
+                <img src="static/train.png" alt="Train Stations">
+            </div>
+            <span class="button-label">רכבת</span>
+        </div>
+        <div class="layer-button" id="shoppingCenterLayerButton">
+            <div class="image-container">
+                <img src="static/shopping_center.png" alt="Shopping Centers">
+            </div>
+            <span class="button-label">מרכזים מסחריים</span>
+        </div>
+        <div class="layer-button" id="rentsLayerButton">
+            <div class="image-container">
+                <img src="static/rent.png" alt="Biking">
+            </div>
+            <span class="button-label">שכירויות</span>
+        </div>
+        <div class="layer-button" id="futureBusinessLayerButton">
+            <div class="image-container">
+                <img src="static/future_business.png" alt="Biking">
+            </div>
+            <span class="button-label">ייעודי קרקע</span>
+        </div>
+    </div>
+
+    <div id="kpi-container">
+        <div class="kpi-square">
+            <h3>סה״כ החנויות </h3>
+            <p id="total-stores">872762</p>
+        </div>
+        <div class="kpi-square">
+            <h3>ממוצע שכירויות</h3>
+            <p id="avg-rent">7841.24 ₪</p>
+        </div>
+        <div class="kpi-square">
+            <h3>סה״כ תושבים</h3>
+            <p id="total-population">10,776,262</p>
+        </div>
+    </div>
+
+    <div id="floating-chart" class="floating-chart">
+        <h3 id="population-graph-title">חתך אוכלוסין</h3>
+        <canvas id="ageDistributionChart"></canvas>
+    </div>
+
+    <div id="arnonaChartContainer">
+      <h3 id="arnonaChartTitle"></h3>
+      <canvas id="arnonaChart"></canvas>
+    </div>
+
+    <div id="list-container">
+        <h4>רשימת העסקים הקיימים</h4>
+        <div id="list-content">
+            <!-- List items will be dynamically added here -->
+        </div>
+    </div>
+
+    <div id="search-container">
+        <input type="text" id="search-input" placeholder="הגדר את אזור החיפוש שלך לפי עיר / רחוב">
+        <button id="search-button">חיפוש</button>
+    </div>
+
+    <div id="map"></div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+</body>
+</html>
