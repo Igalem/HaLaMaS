@@ -63,6 +63,14 @@ class FutureBusiness(Base):
     lat = Column(Float, nullable=False)
     lon = Column(Float, nullable=False)
 
+class CityArnona(Base):
+    __tablename__ = "arnona"
+    __table_args__ = {"schema": "sbp"}
+    id = Column(Integer, primary_key=True, index=True)
+    city = Column(String, nullable=False)
+    year = Column(Integer, nullable=False)
+    price = Column(Float, nullable=False)
+
 # ------- Define models response:
 class StoreLocationResponse(BaseModel):
     id: int
@@ -113,6 +121,15 @@ class FutureBusinessResponse(BaseModel):
     internet: str
     lat: float
     lon: float
+
+    class Config:
+        from_attributes = True
+
+class CityArnonaResponse(BaseModel):
+    id: int
+    city: str
+    year: int
+    price: float
 
     class Config:
         from_attributes = True
@@ -173,10 +190,22 @@ def get_shopping_center():
 
 # Endpoint to fetch future business
 @app.get("/future-business/", response_model=list[FutureBusinessResponse])
-def get_shopping_center():
+def get_future_business():
     db = SessionLocal()
     population = db.query(FutureBusiness).all()
     db.close()
     if not population:
         raise HTTPException(status_code=404, detail="No future business found.")
     return population
+
+@app.get("/city-arnona/{city}", response_model=list[CityArnonaResponse])
+def get_city_arnona(city: str):
+    db = SessionLocal()
+    operators = db.query(CityArnona).filter(
+        CityArnona.city == city
+    ).all()
+    db.close()
+    if not operators:
+        raise HTTPException(status_code=404, detail="No Arnona prices found for this city and type")
+    return operators
+
