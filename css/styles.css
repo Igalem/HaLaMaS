@@ -1,261 +1,830 @@
-body, html {
-    margin: 0;
-    padding: 0;
-    height: 100%;
-    font-family: Arial, sans-serif;
+// Initialize the map
+const map = L.map('map').setView([31.4461, 34.8516], 8.4); // Center on Israel
+let contextMenu;
+let storePin = null;
+let arnonaChart;
+
+let busStationlayerMarkers = [];
+let trainStationlayerMarkers = [];
+let shoppingCenterlayerMarkers = [];
+let futureBusinesslayerMarkers = [];
+let parkingLayerMarkers = [];
+
+let isBusStationLayerOn = false;
+let isTrainStationLayerOn = false;
+let isShoppingCenterLayerOn = false;
+let isFutureBusinessLayerOn = false;
+let isRentLayerOn = false;
+let isParkingLayerOn = false;
+
+// Add a tile layer (OpenStreetMap)
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+}).addTo(map);
+
+// Initialize the context menu
+contextMenu = L.DomUtil.create('div', 'leaflet-contextmenu');
+contextMenu.innerHTML = `
+  <div class="leaflet-contextmenu-item" id="pin-store">נעץ את העסק שלי</div>
+  <div class="leaflet-contextmenu-item" id="delete-store">מחיקת העסק שלי</div>
+`;
+document.body.appendChild(contextMenu);
+
+// Add context menu event listeners
+map.on('contextmenu', onMapRightClick);
+map.on('click', hideContextMenu);
+
+// Handle context menu item clicks
+contextMenu.querySelector('#pin-store').addEventListener('click', onPinStoreClick);
+contextMenu.querySelector('#delete-store').addEventListener('click', onDeleteStoreClick);
+
+// Handle right-click on the map
+function onMapRightClick(e) {
+  const { latlng } = e;
+
+  // Show the context menu at the clicked location
+  contextMenu.style.display = 'block';
+  contextMenu.style.left = `${e.originalEvent.clientX}px`;
+  contextMenu.style.top = `${e.originalEvent.clientY}px`;
+
+  // Store the clicked location for later use
+  contextMenu.dataset.latlng = JSON.stringify(latlng);
 }
 
-#map {
-    height: 100%;
+// Hide the context menu
+function hideContextMenu() {
+  contextMenu.style.display = 'none';
 }
 
-.leaflet-contextmenu {
-      display: none;
-      position: absolute;
-      background: white;
-      border: 1px solid #ccc;
-      padding: 10px;
-      z-index: 1000;
-      box-shadow: 0 2px 5px rgba(0,0,0,0.2);
-      font-size: 14px;
+// Handle "Pin my store here" click
+function onPinStoreClick() {
+  if (storePin) {
+    alert("You can only create one store pin. Delete the existing pin to create a new one.");
+    return;
+  }
+
+  const latlng = JSON.parse(contextMenu.dataset.latlng);
+
+  // Add a marker at the clicked location
+  storePin = L.marker(latlng,{
+    icon: new L.Icon(
+      {
+        iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-yellow.png',
+        shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-shadow.png',
+        iconSize: [25, 41],
+        iconAnchor: [12, 41],
+        popupAnchor: [1, -34],
+        shadowSize: [41, 41]
+      })
+     }
+  ).addTo(map);
+  storePin.bindPopup("העסק שלי").openPopup();
+
+  // Hide the context menu
+  hideContextMenu();
+}
+
+// Handle "Delete my store" click
+function onDeleteStoreClick() {
+  if (storePin) {
+    map.removeLayer(storePin); // Remove the pin from the map
+    storePin = null; // Reset the pin variable
+    alert("Store pin deleted.");
+  } else {
+    alert("No store pin to delete.");
+
+  // Hide the context menu
+  hideContextMenu();
     }
-    .leaflet-contextmenu-item {
-      cursor: pointer;
-      padding: 5px 10px;
+}
+
+
+
+
+
+// Variable to store the current marker
+let currentMarker = null;
+
+// Variable to store green markers
+let greenMarkers = [];
+
+// Variable to store the currently selected marker
+let selectedMarker = null;
+
+let previous_search = null;
+
+// Mock data for KPIs (city-specific)
+const kpiData = {
+    "Aco": { totalStores: 571, avgRent: 3512.82 },
+    "תל אביב": { totalStores: 1200, avgRent: 8500.50 },
+    "ירושלים": { totalStores: 900, avgRent: 4500.75 },
+    "חיפה": { totalStores: 700, avgRent: 4000.25 },
+    "באר שבע": { totalStores: 482, avgRent: 3172.74 },
+};
+
+
+
+
+
+// Function to fetch store locations from FastAPI
+async function fetchStoreLocations(city) {
+    try {
+        const response = await fetch(`http://localhost:8000/store-locations/${city}`);
+        if (!response.ok) {
+            throw new Error("No locations found for this city");
+        }
+        return await response.json();
+    } catch (error) {
+        console.error("Error fetching store locations:", error);
+        return [];
     }
-    .leaflet-contextmenu-item:hover {
-      background: lightblue;
+}
+
+// Function to search for a city or street
+document.getElementById('search-button').addEventListener('click', function() {
+    const query = document.getElementById('search-input').value;
+    if (query && query !== previous_search) {
+        console.log("Searching: ", query, " - ", previous_search);
+        previous_search = query;
+        searchLocation(query);
+    }
+});
+
+// Function to handle location search
+async function searchLocation(query) {
+    arnonaChartContainer.style.display = 'none'
+    isRentLayerOn = false;
+    rentsLayerButton.className = 'layer-button'
+
+    const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query + ', Israel')}`;
+
+    fetch(url)
+        .then(response => response.json())
+        .then(async data => {
+            if (data.length > 0) {
+                const lat = parseFloat(data[0].lat);
+                const lon = parseFloat(data[0].lon);
+                const displayName = data[0].display_name;
+
+                // Remove the previous marker if it exists
+                if (currentMarker) {
+                    map.removeLayer(currentMarker);
+                }
+
+                // Add a new marker for the searched location
+                currentMarker = L.marker([lat, lon]).addTo(map)
+                    .bindPopup(`<b>${query}</b>`)
+                    .openPopup();
+
+                // Determine zoom level based on the type of location
+                let zoomLevel = 14; // Default zoom for cities
+                if (displayName.includes("street") || displayName.includes("Road") || displayName.includes("St")) {
+                    zoomLevel = 15; // Higher zoom for streets
+                }
+
+                // Center the map on the new marker with the appropriate zoom level
+                map.setView([lat, lon], zoomLevel);
+
+                // Update KPIs based on the city ****
+                updateKPIs(query);
+                updateCityPopulation(query)
+                updateCityPopulationGraph(query);
+
+                // Fetch store locations for the searched city
+                const storeLocations = await fetchStoreLocations(query);
+                console.log("Store locations: ", storeLocations.slice(0, 5));
+
+                if (storeLocations.length > 0) {
+                    addGreenPins(storeLocations);
+                    updateList(storeLocations); // Update the list with green pins
+                } else {
+                    removeGreenPins(); // Remove green pins if no locations found
+                    updateList([]); // Clear the list
+                }
+            } else {
+                alert('Location not found!');
+            }
+        })
+        .catch(error => {
+            console.error('Error fetching data:', error);
+        });
+}
+
+// Function to update KPIs
+function updateKPIs(city) {
+    const kpi = kpiData[city] || { totalStores: 0, avgRent: 0.00 }; // Default values if city not found
+    document.getElementById('total-stores').textContent = kpi.totalStores;
+    document.getElementById('avg-rent').textContent = kpi.avgRent.toLocaleString('en-US', {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+    });
+}
+
+async function updateCityPopulation(city) {
+    try {
+        // Make the API call
+        const response = await fetch(`http://127.0.0.1:8000/city-population/${city}`);
+        if (!response.ok) {
+            throw new Error(`HTTP error! Status: ${response.status}`);
+        }
+
+        // Parse the JSON response
+        const data = await response.json();
+
+        // Extract the "total" population from the response
+        const totalPopulation = data[0].total;
+
+        // Update the #total-population element with the new value
+        document.getElementById('total-population').textContent = totalPopulation.toLocaleString();
+    } catch (error) {
+        console.error('Error fetching city population:', error);
+    }
+}
+
+// Function to add green pins for store locations
+function addGreenPins(storeLocations) {
+    // Remove existing green pins (if any)
+    removeGreenPins();
+
+    // Add new green pins
+    storeLocations.forEach(location => {
+        const greenMarker = L.marker([location.lat, location.lon], {
+            icon: new L.Icon({
+                iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-green.png',
+                shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-shadow.png',
+                iconSize: [25, 41],
+                iconAnchor: [12, 41],
+                popupAnchor: [1, -34],
+                shadowSize: [41, 41]
+            })
+        }).addTo(map)
+        .bindPopup(`<b>${location.name}</b>`);
+        greenMarkers.push(greenMarker); // Store the marker for later removal
+    });
+}
+
+// Function to remove green pins
+function removeGreenPins() {
+    greenMarkers.forEach(marker => map.removeLayer(marker));
+    greenMarkers = []; // Clear the array
+}
+
+// Function to update the list of green pins
+function updateList(locations) {
+    const listContainer = document.getElementById('list-container');
+    const listContent = document.getElementById('list-content'); // Ensure this element exists in your HTML
+
+    // Clear existing list items (except the header)
+    if (listContent) {
+        listContent.innerHTML = ''; // Clear all content inside the list-content container
     }
 
-#search-container {
-    position: absolute;
-    top: 140px;
-    left: 60px;
-    z-index: 1000;
-    background: rgba(255, 255, 255, 0.9);
-    padding: 10px;
-    border-radius: 5px;
-    box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+    if (locations.length > 0) {
+        locations.forEach((location, index) => {
+            const listItem = document.createElement('div');
+            listItem.className = 'list-item';
+            listItem.textContent = location.name;
+
+            // Add click event listener to the list item
+            listItem.addEventListener('click', () => {
+                // Remove the selected class from all list items
+                document.querySelectorAll('.list-item').forEach(item => item.classList.remove('selected'));
+
+                // Add the selected class to the clicked list item
+                listItem.classList.add('selected');
+
+                // Center the map on the selected pin
+                map.setView([location.lat, location.lon], 15);
+
+                // Highlight the selected pin
+                highlightMarker(index);
+            });
+
+            // Append the list item to the list content container
+            if (listContent) {
+                listContent.appendChild(listItem);
+            }
+        });
+
+        listContainer.style.display = 'block'; // Show the list container
+    } else {
+        listContainer.style.display = 'none'; // Hide the list container if there are no locations
+    }
 }
 
-#search-input {
-    padding: 5px;
-    width: 300px;
-    text-align: right;
-}
+// Function to highlight the selected marker
+function highlightMarker(index) {
+    // Reset the previously selected marker to green
+    if (selectedMarker) {
+        selectedMarker.setIcon(new L.Icon({
+            iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-green.png',
+            shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-shadow.png',
+            iconSize: [25, 41],
+            iconAnchor: [12, 41],
+            popupAnchor: [1, -34],
+            shadowSize: [41, 41],
+            setZIndexOffset: [1000]
+        }));
+        selectedMarker.setZIndexOffset(1000);
+    }
 
-#search-button {
-    padding: 5px 10px;
-    margin-left: 5px;
-}
+    // Highlight the selected marker
+    selectedMarker = greenMarkers[index];
+    selectedMarker.setIcon(new L.Icon({
+        iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-red.png',
+        shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-shadow.png',
+        iconSize: [30, 48], // Slightly larger icon
+        iconAnchor: [15, 48],
+        popupAnchor: [1, -34],
+        shadowSize: [41, 41]
+    }));
+    selectedMarker.setZIndexOffset(1000);
 
-#kpi-container {
-    position: absolute;
-    top: 20px;
-    left: 60px;
-    z-index: 1000;
-    background: rgba(255, 255, 255, 0.9);
-    padding: 15px;
-    border-radius: 5px;
-    box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
-    display: flex;
-    gap: 15px;
-}
-
-.kpi-square {
-    background: #f4f4f4;
-    padding: 15px;
-    border-radius: 5px;
-    text-align: center;
-    min-width: 120px;
-}
-
-.kpi-square h3 {
-    margin: 0;
-    font-size: 16px;
-    color: #333;
-}
-
-.kpi-square p {
-    margin: 5px 0 0;
-    font-size: 20px;
-    color: #0078a8;
-    font-weight: bold;
-}
-
-#list-container {
-    position: absolute;
-    top: 200px;
-    left: 60px;
-    z-index: 999;
-    background: white;
-    padding: 15px;
-    border-radius: 5px;
-    box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
-    width: 300px;
-    height: 340px;
-    display: flex;
-    flex-direction: column;
-    text-align: right;
-    display: none;
-}
-
-#list-container h4 {
-    padding: 10px;
-    background-color: #f0f0f0;
-    margin: 0;
-    border-bottom: 1px solid #ccc;
-    flex-shrink: 0;
-    font-size: 14px;
-}
-
-#list-content {
-    flex: 1;
-    overflow-y: auto;
-    padding: 10px;
-    height: 280px;
-    direction: rtl;
-}
-
-.list-item {
-    padding: 10px;
-    background: white;
-    border-radius: 5px;
-    margin-bottom: 10px;
-    cursor: pointer;
-    box-shadow: 0 0 5px rgba(0, 0, 0, 0.1);
-    font-size: 14px;
-}
-
-.list-item:hover {
-    background: #e0e0e0;
-}
-
-.list-item.selected {
-    background: #0078a8;
-    color: white;
-}
-
-.floating-chart {
-    position: absolute;
-    top: 2%;
-    right: 2%;
-    background-color: rgba(255, 255, 255, 0.9);
-    border: 1px solid #ddd;
-    border-radius: 8px;
-    padding: 15px;
-    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
-    z-index: 1000;
-    width: 440px;
-    height: 240px;
-    display: none;
-}
-
-.floating-chart h3 {
-  margin-top: 0;
-  margin-bottom: 10px;
-  font-size: 18px;
-  text-align: center;
-}
-
-floating-chart canvas {
-  width: 240px !important; /* Full width */
-  height: 350px !important; /* Fixed height */
+    // Open the popup for the selected marker
+    selectedMarker.openPopup();
 }
 
 
-.layers-container {
-    position: absolute;
-    bottom: 2%;
-    left: 35%;
-    z-index: 1000;
-    display: flex;
-    gap: 15px;
-    background: rgba(255, 255, 255, 0.8);
-    padding: 10px;
-    border-radius: 15px;
-    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
-    transform: scale(0.75);
+// ----------- GRAPH Generator
+let ageChart = null; // Variable to store the chart instance
+
+// Function to fetch city population data and update the KPI and bar chart
+async function updateCityPopulationGraph(city) {
+    try {
+        // Make the API call
+        const response = await fetch(`http://127.0.0.1:8000/city-population/${city}`);
+        if (!response.ok) {
+            throw new Error(`HTTP error! Status: ${response.status}`);
+        }
+
+        // Parse the JSON response
+        const data = await response.json();
+
+        // Extract the "total" population and update the KPI
+        const totalPopulation = data[0].total;
+        document.getElementById('total-population').textContent = totalPopulation.toLocaleString();
+
+        // Update graph title with city name
+        document.getElementById('population-graph-title').innerHTML = 'חתך אוכלוסין - ' + city;
+
+        // Extract age distribution data
+        const ageData = {
+            labels: ["0-5", "6-18", "19-45", "46-55", "56-64", "65+"],
+            datasets: [{
+                label: 'מספר תושבים',
+                data: [
+                    data[0].age_0_5,
+                    data[0].age_6_18,
+                    data[0].age_19_45,
+                    data[0].age_46_55,
+                    data[0].age_56_64,
+                    data[0].age_65
+                ],
+                backgroundColor: [
+                    'rgba(255, 99, 132, 0.6)',
+                    'rgba(54, 162, 235, 0.6)',
+                    'rgba(75, 192, 192, 0.6)',
+                    'rgba(255, 206, 86, 0.6)',
+                    'rgba(153, 102, 255, 0.6)',
+                    'rgba(255, 159, 64, 0.6)'
+                ],
+                borderColor: [
+                    'rgba(255, 99, 132, 1)',
+                    'rgba(54, 162, 235, 1)',
+                    'rgba(75, 192, 192, 1)',
+                    'rgba(255, 206, 86, 1)',
+                    'rgba(153, 102, 255, 1)',
+                    'rgba(255, 159, 64, 1)'
+                ],
+                borderWidth: 1
+            }]
+        };
+
+        // Render the bar chart
+        renderBarChart(ageData);
+    } catch (error) {
+        console.error('Error fetching city population:', error);
+    }
 }
 
-.layer-button {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    width: 100px;
-    cursor: pointer;
-    transition: all 0.3s ease;
+// Function to render the bar chart
+function renderBarChart(ageData) {
+    population_chart = document.getElementById('floating-chart')
+    population_chart.style.display = 'block';
+
+
+    const ctx = document.getElementById('ageDistributionChart').getContext('2d');
+
+    // Destroy the existing chart instance if it exists
+    if (ageChart) {
+        ageChart.destroy();
+    }
+
+    // Create a new chart instance
+    ageChart = new Chart(ctx, {
+        type: 'bar',
+        data: ageData,
+        options: {
+            responsive: true, // Disable responsive behavior
+            maintainAspectRatio: true, // Disable aspect ratio maintenance
+
+            scales: {
+                y: {
+                    beginAtZero: true,
+                    title: {
+                        display: true,
+                        text: 'מספר תושבים'
+                    }
+                },
+                x: {
+                    title: {
+                        display: true,
+                        text: 'גיל'
+                    }
+                }
+            },
+            plugins: {
+                legend: {
+                    display: true,
+                    position: 'top'
+                }
+            }
+        }
+    });
 }
 
-.layer-button:hover .image-container {
-    border-color: #2196F3;
+// LAYERS ----------------------
+// Fetch bus stations from the API
+async function fetchBusStations() {
+    const city = document.getElementById('search-input').value;
+    const stationoperatortypename = "מפעילי אוטובוסים";
+    const url = `http://localhost:8000/city-transportation/${encodeURIComponent(city)}/${encodeURIComponent(stationoperatortypename)}`;
+
+    try {
+        const response = await fetch(url);
+        const data_layer = await response.json();
+        console.log("Data Layer: ", data_layer.slice(0, 5));
+
+        // Clear existing markers
+        busStationlayerMarkers.forEach(layerMarker => map.removeLayer(layerMarker));
+        busStationlayerMarkers = [];
+
+        // Add new layerMarkers for each station
+        data_layer.forEach(station => {
+            const busLayerMarker = L.marker([station.lat, station.long], {
+                icon: L.icon({
+                    iconUrl: 'static/bus.png',
+                    iconSize: [24, 24], // Size of the icon
+                    iconAnchor: [12, 24], // Point of the icon which will correspond to marker's location
+                    popupAnchor: [1, -34]
+                }),
+                title: station.stationoperatortypename,
+            }).addTo(map);
+
+            busLayerMarker.bindPopup(`<b>${station.stationtypename}</b>`);
+
+            busStationlayerMarkers.push(busLayerMarker);
+        });
+    } catch (error) {
+        console.error("Error fetching train stations:", error);
+    }
 }
 
-.layer-button:hover .button-label {
-    color: #2196F3;
+// Fetch train stations from the API
+async function fetchTrainStations() {
+    const city = document.getElementById('search-input').value;
+    const stationoperatortypename = "רכבת";
+    const url = `http://localhost:8000/city-transportation/${encodeURIComponent(city)}/${encodeURIComponent(stationoperatortypename)}`;
+
+    try {
+        const response = await fetch(url);
+        const data_layer = await response.json();
+        console.log("Data Layer: ", data_layer.slice(0, 5));
+
+        // Clear existing markers
+        trainStationlayerMarkers.forEach(layerMarker => map.removeLayer(layerMarker));
+        trainStationlayerMarkers = [];
+
+        // Add new layerMarkers for each station
+        data_layer.forEach(station => {
+            const trainLayerMarker = L.marker([station.lat, station.long], {
+                icon: L.icon({
+                    iconUrl: 'static/train.png',
+                    iconSize: [24, 24], // Size of the icon
+                    iconAnchor: [12, 24], // Point of the icon which will correspond to marker's location
+                    popupAnchor: [1, -34],
+                }),
+                title: station.stationoperatortypename,
+            }).addTo(map);
+
+            trainLayerMarker.bindPopup(`<b>${station.stationtypename}</b>`);
+
+            trainStationlayerMarkers.push(trainLayerMarker);
+        });
+    } catch (error) {
+        console.error("Error fetching train stations:", error);
+    }
 }
 
-.layer-button.active .image-container {
-    border-color: #2196F3;
-    border-width: 3px;
-    background: lightblue;
+// Fetch shopping center from the API
+async function fetchShoppingCenter() {
+    const url = `http://localhost:8000/city-shopping-center`;
+
+    try {
+        const response = await fetch(url);
+        const data_layer = await response.json();
+        console.log("Data Layer: ", data_layer.slice(0, 5));
+
+        // Clear existing markers
+        shoppingCenterlayerMarkers.forEach(layerMarker => map.removeLayer(layerMarker));
+        shoppingCenterlayerMarkers = [];
+
+        // Add new layerMarkers for each station
+        data_layer.forEach(station => {
+            const shoppingCenterLayerMarker = L.marker([station.lat, station.lon], {
+                icon: L.icon({
+                    iconUrl: 'static/shopping_center.png',
+                    iconSize: [24, 24], // Size of the icon
+                    iconAnchor: [12, 24], // Point of the icon which will correspond to marker's location
+                    popupAnchor: [1, -34],
+                    setZIndexOffset: [1000]
+                }),
+                title: station.name,
+            }).addTo(map);
+
+            shoppingCenterLayerMarker.bindPopup(`<b>${station.name}</b>`);
+
+            shoppingCenterlayerMarkers.push(shoppingCenterLayerMarker);
+        });
+    } catch (error) {
+        console.error("Error fetching shopping center:", error);
+    }
 }
 
-.layer-button.active .button-label {
-    color: #2196F3;
-    font-weight: 500;
+// Fetch future business from the API
+async function fetchFutureBusiness() {
+    const url = `http://localhost:8000/future-business`;
+
+    try {
+        const response = await fetch(url);
+        const data_layer = await response.json();
+        console.log("Data Layer: ", data_layer.slice(0, 5));
+
+        // Clear existing markers
+        futureBusinesslayerMarkers.forEach(layerMarker => map.removeLayer(layerMarker));
+        futureBusinesslayerMarkers = [];
+
+        // Add new layerMarkers for each station
+        data_layer.forEach(station => {
+            const futureBusinesslayerMarker = L.marker([station.lat, station.lon], {
+                icon: L.icon({
+                    iconUrl: 'static/future_business.png',
+                    iconSize: [24, 24], // Size of the icon
+                    iconAnchor: [12, 24], // Point of the icon which will correspond to marker's location
+                    popupAnchor: [1, -34],
+                    setZIndexOffset: [1000]
+                }),
+                title: station.plandisgn,
+            }).addTo(map);
+
+            futureBusinesslayerMarker.bindPopup(`
+                <b>תבע: ${station.plandisgn}</b><br>
+                שטח חלקה: ${Math.round(station.shape_area)} מ״ר<br>
+                <a href="${station.internet}" target="_blank">תעודת זהות של הנכס</a>
+            `);
+
+            futureBusinesslayerMarkers.push(futureBusinesslayerMarker);
+        });
+    } catch (error) {
+        console.error("Error fetching future business:", error);
+    }
 }
 
-.image-container {
-    width: 60px;
-    height: 60px;
-    border: 2px solid #ccc;
-    border-radius: 15px;
-    overflow: hidden;
-    transition: all 0.3s ease;
-    background: white;
+// Fetch parking from the API
+async function fetchParking() {
+    const city = document.getElementById('search-input').value;
+    const url = `http://localhost:8000/city-parking/${encodeURIComponent(city)}`;
+
+    try {
+        const response = await fetch(url);
+        const data_layer = await response.json();
+        console.log("Data Layer: ", data_layer.slice(0, 5));
+
+        // Clear existing markers
+        parkingLayerMarkers.forEach(layerMarker => map.removeLayer(layerMarker));
+        parkingLayerMarkers = [];
+
+        // Add new layerMarkers for each station
+        data_layer.forEach(station => {
+            const parkingLayerMarker = L.marker([station.lat, station.lon], {
+                icon: L.icon({
+                    iconUrl: 'static/parking.png',
+                    iconSize: [24, 24], // Size of the icon
+                    iconAnchor: [12, 24], // Point of the icon which will correspond to marker's location
+                    popupAnchor: [1, -34],
+                    setZIndexOffset: [1000]
+                }),
+                title: station.name,
+            }).addTo(map);
+
+            parkingLayerMarker.bindPopup(`<b>${station.name}</b>`);
+
+            parkingLayerMarkers.push(parkingLayerMarker);
+        });
+    } catch (error) {
+        console.error("Error fetching parking:", error);
+    }
 }
 
-.image-container img {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-    display: block;
+// Toggle Buttons Layer ---------------------------
+// Toggle the Buttons layer
+function toggleBusStationLayerButton() {
+    const city = document.getElementById('search-input').value;
+
+    if (city) {
+        console.log('toggleBusStationLayerButton Layer toggle');
+        if (isBusStationLayerOn) {
+            // Layer is currently on, turn it off
+            busStationlayerMarkers.forEach(marker => map.removeLayer(marker));
+            busStationlayerMarkers = [];
+            isBusStationLayerOn = false;
+        } else {
+            // Layer is currently off, turn it on
+            console.log('Trying to fetch Bus Stations layer data');
+            fetchBusStations();
+            isBusStationLayerOn = true;
+        }
+    }
 }
 
-.button-label {
-    margin-top: 8px;
-    font-size: 14px;
-    text-align: center;
-    color: #333;
-    transition: color 0.3s ease;
+function toggleTrainStationLayerButton() {
+    const city = document.getElementById('search-input').value;
+
+    if (city) {
+        console.log('toggleTrainStationLayerButton Layer toggle');
+        if (isTrainStationLayerOn) {
+            // Layer is currently on, turn it off
+            trainStationlayerMarkers.forEach(marker => map.removeLayer(marker));
+            trainStationlayerMarkers = [];
+            isTrainStationLayerOn = false;
+        } else {
+            // Layer is currently off, turn it on
+            console.log('Trying to fetch train Stations layer data');
+            fetchTrainStations();
+            isTrainStationLayerOn = true;
+        }
+    }
 }
 
-#arnonaChartContainer {
-  position: absolute;
-  bottom: 32%;
-  right: 2%;
-  width: 33%;
-  height: 30%;
-  background: rgba(255, 255, 255, 0.9);
-  border-radius: 8px;
-  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
-  padding: 10px;
-  z-index: 1000; /* Ensure the chart is above the map */
-  pointer-events: auto; /* Allow interaction with the chart */
-  display: none;
+function toggleShoppingCenterStationLayerButton() {
+    console.log('toggleShoppingCenterStationLayerButton Layer toggle');
+    if (isShoppingCenterLayerOn) {
+        // Layer is currently on, turn it off
+        shoppingCenterlayerMarkers.forEach(marker => map.removeLayer(marker));
+        shoppingCenterlayerMarkers = [];
+        isShoppingCenterLayerOn = false;
+    } else {
+        // Layer is currently off, turn it on
+        console.log('Trying to fetch train Stations layer data');
+        fetchShoppingCenter();
+        isShoppingCenterLayerOn = true;
+    }
 }
 
-#arnonaChartTitle {
-  text-align: center;
-  margin: 0 0 10px 0;
-  font-size: 18px;
-  font-weight: bold;
-  color: #333;
+function toggleFutureBusinessLayerButton() {
+    console.log('toggleFutureBusinessLayerButton Layer toggle');
+    if (isFutureBusinessLayerOn) {
+        // Layer is currently on, turn it off
+        futureBusinesslayerMarkers.forEach(marker => map.removeLayer(marker));
+        futureBusinesslayerMarkers = [];
+        isFutureBusinessLayerOn = false;
+    } else {
+        // Layer is currently off, turn it on
+        console.log('Trying to fetch future business layer data');
+        fetchFutureBusiness();
+        isFutureBusinessLayerOn = true;
+    }
 }
 
-#arnonaChart {
-  width: 100%;
-  height: calc(100% - 30px); /* Adjust height to fit below the title */
+function toggleParkingLayerButton() {
+    console.log('toggleParkingLayerButton Layer toggle');
+    if (isParkingLayerOn) {
+        // Layer is currently on, turn it off
+        parkingLayerMarkers.forEach(marker => map.removeLayer(marker));
+        parkingLayerMarkers = [];
+        isParkingLayerOn = false;
+    } else {
+        // Layer is currently off, turn it on
+        console.log('Trying to fetch parking layer data');
+        fetchParking();
+        isParkingLayerOn = true;
+    }
 }
 
+// Add event listener to the buttons
+document.getElementById('busStationLayerButton').addEventListener('click', toggleBusStationLayerButton);
+document.getElementById('trainStationLayerButton').addEventListener('click', toggleTrainStationLayerButton);
+document.getElementById('shoppingCenterLayerButton').addEventListener('click', toggleShoppingCenterStationLayerButton);
+document.getElementById('rentsLayerButton').addEventListener('click', toggleArnonaChartButton);
+document.getElementById('futureBusinessLayerButton').addEventListener('click', toggleFutureBusinessLayerButton);
+document.getElementById('parkingLayerButton').addEventListener('click', toggleParkingLayerButton);
+
+document.querySelectorAll('.layer-button').forEach(button => {
+    button.addEventListener('click', function() {
+        // Toggle the 'active' class on the clicked button
+        this.classList.toggle('active');
+    });
+});
+
+// Fetch data from the API and draw the Arnona chart
+async function fetchDataAndDrawArnonaChart() {
+  const city = document.getElementById('search-input').value;
+
+  const url = `http://localhost:8000/city-arnona/${encodeURIComponent(city)}`;
+
+  try {
+    const response = await fetch(url);
+    const data = await response.json();
+    console.log("Data Layer: ", data.slice(0, 5));
+
+    // Update the chart title
+    const chartTitle = document.getElementById('arnonaChartTitle');
+    chartTitle.innerHTML = `ארנונה חתך שנתי - ${city}`;
+    arnonaChartContainer.style.display = 'block'
+
+    // Sort data by year in descending order
+    data.sort((a, b) => b.year - a.year);
+
+    // Extract years and prices from the sorted data
+    const years = data.map(item => item.year);
+    const prices = data.map(item => item.price);
+
+    // Destroy the previous chart instance if it exists
+    if (arnonaChart) {
+      arnonaChart.destroy();
+    }
+
+    // Create a new Arnona chart
+    const ctx = document.getElementById('arnonaChart').getContext('2d');
+
+    arnonaChart = new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels: years,
+        datasets: [{
+          label: ` ארנונה שנתית ב${city}`,
+          data: prices,
+          borderColor: 'rgba(75, 192, 192, 1)',
+          borderWidth: 2,
+          fill: false
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        interaction: {
+          mode: 'nearest', // Show tooltips for the nearest point
+          intersect: false
+        },
+        scales: {
+          x: {
+            title: {
+              display: true,
+              text: 'Year'
+            },
+            reverse: true // Display years in descending order on the x-axis
+          },
+          y: {
+            title: {
+              display: true,
+              text: 'Price'
+            }
+          }
+        },
+        plugins: {
+          tooltip: {
+            enabled: true, // Enable tooltips
+            mode: 'nearest',
+            intersect: false
+          }
+        }
+      }
+    });
+  } catch (error) {
+    console.error("Error fetching data:", error);
+  }
+}
+
+function toggleArnonaChartButton() {
+    console.log('toggleArnonaChartButton Layer toggle');
+    if (isRentLayerOn) {
+        // Layer is currently on, turn it off
+        arnonaChartContainer.style.display = 'none'
+        isRentLayerOn = false;
+
+    } else {
+        // Layer is currently off, turn it on
+        fetchDataAndDrawArnonaChart();
+        isRentLayerOn = true;
+    }
+}
